@@ -289,3 +289,14 @@ CI 通过只能说明自动检查通过，不能替代人工语义收敛，也�
 - 自动 tag 默认不触发，只有 commit title 包含 `#patch`、`#minor`、`#major` 才会触发版本号更新。
 - 手动打 tag 必须使用 annotated tag。
 - 用户可见变更优先通过 PR 合入，并补齐 label 与验证说明。
+
+## Cursor Cloud specific instructions
+
+面向在 Cursor Cloud VM 上运行的后续 agent。依赖已由 update script 预装（Python 包在 `~/.local`，`apps/dsa-web/node_modules` 已就绪），此处只记录非显而易见的启动/运行注意事项，命令细节参见本文件 `## 4. 常用命令` 与 `README.md`。
+
+- `python` 命令：系统默认只有 `python3`。已提供 `/usr/local/bin/python -> /usr/bin/python3` 软链接，`scripts/ci_gate.sh`、`scripts/test.sh` 等直接调用 `python` 的脚本才能工作。`~/.local/bin` 已通过 `~/.bashrc` 加入 PATH，因此 `flake8`/`pytest`/`uvicorn` 可直接解析；若在非登录 shell 里找不到它们，用 `python -m flake8` / `python -m pytest` 代替。
+- `.env`：从 `.env.example` 复制而来（被 gitignore，不入库）。默认 `ADMIN_AUTH_ENABLED=false`，Web UI 无需登录即可访问。若 `.env` 丢失，手动 `cp .env.example .env` 即可。
+- 两个必需服务（本地开发）：后端 `uvicorn server:app --host 0.0.0.0 --port 8000`（或 `python main.py --serve-only`）；Web `cd apps/dsa-web && npm run dev`（端口 5173）。Vite 把 `/api` 代理到 `127.0.0.1:8000`（见 `apps/dsa-web/vite.config.ts`），因此后端务必保持在 8000 端口。桌面端 `apps/dsa-desktop` 是可选、与 Web+API 冗余的入口，E2E 测试不需要它。
+- LLM key 默认未配置：首页“Analyze”/AI 报告流程无法产出真实报告（UI 会提示 “Base configuration incomplete - Missing LLM 主通道”）。无需 LLM 即可验证的核心功能：股票实时行情 `/api/v1/stocks/{code}/quote`、自选（watchlist）增删、大盘复盘（无 analyzer 时走模板兜底）、选股 screening，以及 `python main.py --dry-run [--stocks ...]` 跑通数据管线。要启用真实分析，在 `.env` 配置任一 LLM key（如 `GEMINI_API_KEY`）或本地 Ollama。
+- 离线测试：`./scripts/ci_gate.sh offline-tests` 约需 4 分钟。极少数用例是“时间相关/依赖运行顺序”的，与环境无关，可能随系统日期变化偶发失败，例如 `tests/test_yfinance_fundamental_adapter.py` 里 TTM 分红计数（分红日期是硬编码的，落在“今天往前 12 个月”窗口边界上）和 `test_intelligence_service.py::...is_fail_open`（单独跑通过，仅在全量套件顺序下失败）。
+- `static/` 是 `apps/dsa-web` 的构建产物（gitignore），生产模式下由 FastAPI 直接托管；本地开发请用 Vite dev server 而不是构建产物。数据源/新闻/搜索的外网接口偶发限流或 5xx 时会走 fallback，不影响主流程跑通。
