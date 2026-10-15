@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>水彩配色记录器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <div>
+        <h1>水彩配色记录器</h1>
+        <p>自制固体水彩 · 从图片 / 视频 / 链接取色，生成颜料配比并记录</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" data-tab="make" role="tab">配色生成</button>
+      <button class="tab" data-tab="records" role="tab">配方记录 <span class="badge" id="recordCount">0</span></button>
+      <button class="tab" data-tab="library" role="tab">原料库</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-make" class="panel is-active">
+      <div class="grid-2">
+        <div class="card" id="sourceCard">
+          <h2><span class="step">1</span>提供参考</h2>
+          <div class="seg" role="tablist" id="sourceTabs">
+            <button class="seg-btn is-active" data-source="image">图片</button>
+            <button class="seg-btn" data-source="video">视频</button>
+            <button class="seg-btn" data-source="link">链接</button>
+          </div>
+
+          <div class="source-pane is-active" data-pane="image">
+            <label class="drop" id="imageDrop">
+              <input type="file" id="imageFile" accept="image/*" hidden>
+              <strong>点击选择图片</strong>，或拖拽到这里，或直接粘贴（Ctrl/⌘+V）
+            </label>
+          </div>
+          <div class="source-pane" data-pane="video">
+            <label class="drop" id="videoDrop">
+              <input type="file" id="videoFile" accept="video/*" hidden>
+              <strong>点击选择视频</strong>，拖动进度条到想取色的画面，再点「截取当前帧」
+            </label>
+            <div id="videoBox" class="video-box" hidden>
+              <video id="videoEl" controls playsinline muted preload="auto"></video>
+              <div class="row scrub">
+                <button class="btn small" id="stepBack" title="后退 0.1 秒">−0.1s</button>
+                <input type="range" id="scrub" min="0" max="1" step="0.01" value="0" aria-label="视频时间">
+                <button class="btn small" id="stepFwd" title="前进 0.1 秒">+0.1s</button>
+                <span class="muted num" id="scrubTime">0.0 / 0.0s</span>
+              </div>
+              <button class="btn" id="captureFrame">截取当前帧</button>
+            </div>
+          </div>
+          <div class="source-pane" data-pane="link">
+            <form id="linkForm" class="row">
+              <input type="url" id="linkInput" placeholder="图片 / 视频直链，或含图片的网页地址" required>
+              <button class="btn primary" type="submit" id="linkGo">解析</button>
+            </form>
+            <p class="hint">需通过本项目自带的服务访问。视频平台（B 站、YouTube 等）的播放页无法直接读取，请下载后上传，或截图。</p>
+            <div id="linkCandidates" class="candidates"></div>
+          </div>
+
+          <div id="status" class="status" role="status" hidden></div>
+
+          <div id="stage" class="stage" hidden>
+            <canvas id="stageCanvas"></canvas>
+            <div id="loupe" class="marker" hidden></div>
+          </div>
+          <p class="hint" id="stageHint" hidden>点击图片上任意位置取色（取 5×5 像素均值）。</p>
+
+          <div id="paletteBox" hidden>
+            <h3>画面主色</h3>
+            <div id="palette" class="palette"></div>
+          </div>
+
+          <div class="target-row">
+            <div class="swatch big" id="targetSwatch" title="目标色"></div>
+            <div class="grow">
+              <label class="field">目标颜色
+                <span class="row">
+                  <input type="color" id="targetPicker" value="#6C8EBF">
+                  <input type="text" id="targetHex" value="#6C8EBF" maxlength="7" spellcheck="false">
+                </span>
+              </label>
+              <p class="hint">也可以不上传素材，直接输入或选取一个颜色。</p>
+            </div>
+          </div>
+
+          <details class="calib" id="calibBox">
+            <summary>色卡校准：用实物照片校准我的原料色值</summary>
+            <p class="hint">
+              上传你拍的玛丽色卡 / 珠光粉 / 变色龙粉色卡照片，点击其中一个色块取色；在下面选择对应的原料，点「设为色值」，
+              会自动跳到下一个待校准的原料（○ 待校准，✓ 已校准）。效果粉要分别校准正面主色和侧视色。
+            </p>
+            <div class="row">
+              <select id="calibSelect"></select>
+              <button class="btn primary" id="calibMain">设为色值</button>
+              <button class="btn" id="calibSide" hidden>设为侧视色</button>
+            </div>
+          </details>
+        </div>
+
+        <div class="card">
+          <h2><span class="step">2</span>生成配比</h2>
+          <div class="options">
+            <label class="field">最多用几种颜料
+              <select id="maxPigments">
+                <option value="2">2 种</option>
+                <option value="3" selected>3 种</option>
+                <option value="4">4 种</option>
+              </select>
+            </label>
+            <label class="field">每批基础原料总量（g）
+              <input type="number" id="totalGrams" min="0.1" step="0.1" value="2">
+            </label>
+          </div>
+          <p class="hint">优先使用「原料库」里「已有 + 首选」的原料（玛丽水彩）；只有它们配不出目标色时，才会另给出需补充通用颜料的方案。珠光 / 变色龙粉不参与色相计算，会作为效果粉另行建议。</p>
+          <button class="btn primary wide" id="solveBtn">生成配比</button>
+          <div id="results" class="results"></div>
+        </div>
+      </div>
+
+      <div class="card" id="editorCard">
+        <div class="card-head">
+          <h2><span class="step">3</span>配方编辑与记录</h2>
+          <button class="btn" id="newManual">新建手动配方</button>
+        </div>
+        <div id="editor"></div>
+      </div>
+    </section>
+
+    <section id="tab-records" class="panel">
+      <div class="toolbar">
+        <input type="search" id="recordSearch" placeholder="搜索名称、原料、备注">
+        <button class="btn" id="exportJson">导出 JSON</button>
+        <button class="btn" id="exportCsv">导出 CSV</button>
+        <label class="btn">导入 JSON<input type="file" id="importFile" accept="application/json,.json" hidden></label>
+      </div>
+      <div id="recordList" class="records"></div>
+    </section>
+
+    <section id="tab-library" class="panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>原料</h2>
+          <div class="row">
+            <button class="btn" id="addPigment">添加颜料</button>
+            <button class="btn" id="addEffect">添加效果粉</button>
+            <button class="btn" id="resetPigments">恢复默认</button>
+          </div>
+        </div>
+        <p class="hint">
+          「我的原料」里的玛丽 36 色、珠光粉和变色龙粉是<strong>预设估计值</strong>（标「待校准」），并非来自商品页面数据，
+          请用「配色生成」里的「色卡校准」逐个校准，名称也可直接改成你的实际色名。
+          <br>「已有」决定能不能用；「首选」的原料会优先用来配色。着色力越大，少量即可显色；遮盖力越高，加入后越不透明；
+          胶液 g/g 为每 1g 原料需要额外加入的胶液克数（玛丽水彩已含胶，默认 0；干粉类默认 1）。
+          效果粉的「建议用量」是占基础原料质量的百分比。
+        </p>
+        <div class="table-wrap">
+          <table class="lib">
+            <thead>
+              <tr><th>已有</th><th>首选</th><th>颜色 / 正面</th><th>侧视</th><th>名称</th><th>色号 / 来源</th><th>着色力</th><th>遮盖力</th><th>胶液 g/g</th><th></th></tr>
+            </thead>
+            <tbody id="pigmentRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>粘合剂与辅料</h2>
+          <button class="btn" id="addAdditive">添加辅料</button>
+        </div>
+        <p class="hint">
+          胶液名称与「胶:水」配比请按自己的习惯填写在名称里；辅料按相对基础原料总质量的百分比计算。
+          默认值只是常见起点，需要结合实际手感与干燥效果调整。
+        </p>
+        <div class="options">
+          <label class="field">粘合剂名称
+            <input type="text" id="binderName">
+          </label>
+        </div>
+        <div id="additiveRows" class="additives"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
