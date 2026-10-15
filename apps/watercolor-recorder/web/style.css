@@ -210,7 +210,7 @@ textarea { resize: vertical; min-height: 64px; }
 .lib .c-hex input[type=text] { width: 86px; font-family: ui-monospace, Menlo, monospace; }
 .lib input[type=color] { width: 32px; height: 30px; }
 .lib .w-num { width: 74px; }
-.lib .w-code { width: 90px; }
+.lib .w-code { width: 128px; }
 .additives { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-width: 520px; }
 .additive { display: grid; grid-template-columns: 1fr 110px 30px; gap: 8px; align-items: center; }
 

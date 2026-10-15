@@ -432,6 +432,9 @@ function renderResults() {
     html += `<h3 class="group-title">你的原料色域不足（最佳 ΔE00 ${fmt(best, 1)}），可选补充方案</h3>`;
     html += supplement.map((r, i) => resultCard(r, `s:${i}`, i === recS, '补充推荐')).join('');
   }
+  if (preferred.length && best > 6 && !supplement.length) {
+    html += `<p class="hint">你的原料最佳色差 ΔE00 为 ${fmt(best, 1)}，通用参考颜料里也没有明显更好的组合。高饱和的荧光 / 霓虹色通常超出颜料色域，建议选择接近的柔和色，或用效果粉叠加。</p>`;
+  }
   box.innerHTML = html + effectCard();
 }
 
