@@ -89,6 +89,19 @@
               <p class="hint">也可以不上传素材，直接输入或选取一个颜色。</p>
             </div>
           </div>
+
+          <details class="calib" id="calibBox">
+            <summary>色卡校准：用实物照片校准我的原料色值</summary>
+            <p class="hint">
+              上传你拍的玛丽色卡 / 珠光粉 / 变色龙粉色卡照片，点击其中一个色块取色；在下面选择对应的原料，点「设为色值」，
+              会自动跳到下一个待校准的原料（○ 待校准，✓ 已校准）。效果粉要分别校准正面主色和侧视色。
+            </p>
+            <div class="row">
+              <select id="calibSelect"></select>
+              <button class="btn primary" id="calibMain">设为色值</button>
+              <button class="btn" id="calibSide" hidden>设为侧视色</button>
+            </div>
+          </details>
         </div>
 
         <div class="card">
@@ -101,11 +114,11 @@
                 <option value="4">4 种</option>
               </select>
             </label>
-            <label class="field">每批颜料总量（g）
+            <label class="field">每批基础原料总量（g）
               <input type="number" id="totalGrams" min="0.1" step="0.1" value="2">
             </label>
           </div>
-          <p class="hint">只会使用「原料库」中勾选为「已有」的颜料。</p>
+          <p class="hint">优先使用「原料库」里「已有 + 首选」的原料（玛丽水彩）；只有它们配不出目标色时，才会另给出需补充通用颜料的方案。珠光 / 变色龙粉不参与色相计算，会作为效果粉另行建议。</p>
           <button class="btn primary wide" id="solveBtn">生成配比</button>
           <div id="results" class="results"></div>
         </div>
@@ -133,21 +146,24 @@
     <section id="tab-library" class="panel">
       <div class="card">
         <div class="card-head">
-          <h2>颜料</h2>
+          <h2>原料</h2>
           <div class="row">
             <button class="btn" id="addPigment">添加颜料</button>
+            <button class="btn" id="addEffect">添加效果粉</button>
             <button class="btn" id="resetPigments">恢复默认</button>
           </div>
         </div>
         <p class="hint">
-          色值为干燥后纯色的近似屏幕色。想更准：把自己做好的色块拍照或扫描，在「配色生成」里取色，
-          再点对应颜料的「取当前目标色」校准。着色力越大，少量即可显色；遮盖力越高，加入后越不透明；
-          胶液比例为每 1g 颜料需要的阿拉伯胶液克数。
+          「我的原料」里的玛丽 36 色、珠光粉和变色龙粉是<strong>预设估计值</strong>（标「待校准」），并非来自商品页面数据，
+          请用「配色生成」里的「色卡校准」逐个校准，名称也可直接改成你的实际色名。
+          <br>「已有」决定能不能用；「首选」的原料会优先用来配色。着色力越大，少量即可显色；遮盖力越高，加入后越不透明；
+          胶液 g/g 为每 1g 原料需要额外加入的胶液克数（玛丽水彩已含胶，默认 0；干粉类默认 1）。
+          效果粉的「建议用量」是占基础原料质量的百分比。
         </p>
         <div class="table-wrap">
           <table class="lib">
             <thead>
-              <tr><th>已有</th><th>颜色</th><th>名称</th><th>色号</th><th>着色力</th><th>遮盖力</th><th>胶液 g/g</th><th></th></tr>
+              <tr><th>已有</th><th>首选</th><th>颜色 / 正面</th><th>侧视</th><th>名称</th><th>色号 / 来源</th><th>着色力</th><th>遮盖力</th><th>胶液 g/g</th><th></th></tr>
             </thead>
             <tbody id="pigmentRows"></tbody>
           </table>
@@ -160,7 +176,7 @@
           <button class="btn" id="addAdditive">添加辅料</button>
         </div>
         <p class="hint">
-          胶液名称与「胶:水」配比请按自己的习惯填写在名称里；辅料按相对颜料总质量的百分比计算。
+          胶液名称与「胶:水」配比请按自己的习惯填写在名称里；辅料按相对基础原料总质量的百分比计算。
           默认值只是常见起点，需要结合实际手感与干燥效果调整。
         </p>
         <div class="options">

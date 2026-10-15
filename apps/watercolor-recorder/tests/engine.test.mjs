@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
   batchPlan, deltaE2000, describeDeltaE, extractPalette, hexToLab, hexToRgb, mixHex,
-  normalizePercents, pickRecommended, rgbToHex, solveRecipe,
+  normalizePercents, pickRecommended, recommendEffects, rgbToHex, solveRecipe, solveWithPreference,
 } from '../web/engine.js';
-import { DEFAULT_PIGMENTS } from '../web/pigments.js';
+import {
+  DEFAULT_PIGMENTS, EFFECT_PIGMENTS, GENERIC_PIGMENTS, MARIES_PIGMENTS, migratePigments,
+} from '../web/pigments.js';
 
 const byId = Object.fromEntries(DEFAULT_PIGMENTS.map((p) => [p.id, p]));
 const mix = (...pairs) => mixHex(pairs.map(([id, weight]) => ({ pigment: byId[id], weight })));
@@ -47,7 +49,7 @@ test('加白后明度升高且随白色比例单调', () => {
 
 test('求解器能找回由已知配方混出的颜色', () => {
   const target = mix(['py74', 3], ['pb28', 2], ['pw6', 1]);
-  const results = solveRecipe(target, DEFAULT_PIGMENTS, { maxPigments: 3 });
+  const results = solveRecipe(target, GENERIC_PIGMENTS, { maxPigments: 3 });
   assert.equal(results.length, 3);
   const best = results.find((r) => r.count === 3);
   assert.ok(best.deltaE < 1.5, `ΔE=${best.deltaE}`);
@@ -107,4 +109,86 @@ test('batchPlan 计算颜料、胶液与辅料克数', () => {
   assert.ok(Math.abs(plan.pigments[1].grams - 0.8) < 1e-9);
   assert.ok(Math.abs(plan.binderTotal - 1.6) < 1e-9);
   assert.ok(Math.abs(plan.extras[0].grams - 0.2) < 1e-9);
+});
+
+test('原料库预设：玛丽 36 色、效果粉分组与字段', () => {
+  assert.equal(MARIES_PIGMENTS.length, 36);
+  assert.equal(new Set(DEFAULT_PIGMENTS.map((p) => p.id)).size, DEFAULT_PIGMENTS.length);
+  for (const p of MARIES_PIGMENTS) {
+    assert.ok(p.preferred && p.owned && p.group === 'mine' && p.kind === 'color' && p.binder === 0 && !p.calibrated);
+  }
+  assert.equal(EFFECT_PIGMENTS.filter((p) => p.subtype === 'chameleon').length, 12);
+  for (const p of EFFECT_PIGMENTS) assert.ok(p.kind === 'effect' && p.hex2 && p.dose > 0);
+  for (const p of GENERIC_PIGMENTS) assert.ok(!p.owned && !p.preferred && p.group === 'generic');
+});
+
+test('求解器不会把效果粉当作混色原料', () => {
+  const results = solveRecipe('#8844AA', DEFAULT_PIGMENTS.filter((p) => p.kind === 'effect' || p.id === 'pb29' || p.id === 'pv19'), { maxPigments: 3 });
+  for (const r of results) for (const it of r.items) assert.ok(['pb29', 'pv19'].includes(it.id));
+});
+
+test('首选我的原料：目标色可由玛丽色配出时不出现补充方案', () => {
+  const target = mix(['mm12', 1]);
+  const { preferred, supplement } = solveWithPreference(target, DEFAULT_PIGMENTS, { maxPigments: 3 });
+  assert.ok(preferred.length === 3 && supplement.length === 0);
+  for (const r of preferred) for (const it of r.items) assert.ok(it.id.startsWith('mm'));
+  assert.ok(Math.min(...preferred.map((r) => r.deltaE)) < 1.5);
+});
+
+test('我的原料色域不足时，补充方案只在明显更好且含非首选原料时出现', () => {
+  const onlyBlackWhite = DEFAULT_PIGMENTS.map((p) => ({ ...p, owned: ['mm27', 'mm28'].includes(p.id) || p.group === 'generic' }));
+  const { preferred, supplement } = solveWithPreference('#C5245F', onlyBlackWhite, { maxPigments: 3 });
+  assert.ok(preferred.length > 0);
+  for (const r of preferred) for (const it of r.items) assert.ok(['mm27', 'mm28'].includes(it.id));
+  const bestMine = Math.min(...preferred.map((r) => r.deltaE));
+  assert.ok(bestMine > 6);
+  assert.ok(supplement.length > 0);
+  for (const r of supplement) {
+    assert.ok(r.deltaE < bestMine - 1.5);
+    assert.ok(r.items.some((it) => it.extra));
+    assert.ok(r.items.every((it) => it.extra === !['mm27', 'mm28'].includes(it.id)));
+  }
+});
+
+test('没有任何首选原料时，preferred 为空而不是抛错', () => {
+  const none = DEFAULT_PIGMENTS.map((p) => ({ ...p, owned: false }));
+  assert.deepEqual(solveWithPreference('#336699', none).preferred, []);
+});
+
+test('recommendEffects 按色相接近度排序，且只推荐已有的效果粉', () => {
+  const ranked = recommendEffects('#2E5DC8', DEFAULT_PIGMENTS, 3);
+  assert.equal(ranked.length, 3);
+  assert.ok(ranked[0].deltaE <= ranked[1].deltaE && ranked[1].deltaE <= ranked[2].deltaE);
+  assert.ok(ranked.every((r) => r.pigment.kind === 'effect'));
+  const none = recommendEffects('#2E5DC8', DEFAULT_PIGMENTS.map((p) => ({ ...p, owned: false })));
+  assert.deepEqual(none, []);
+});
+
+test('batchPlan 将效果粉按基础原料质量百分比计入克数与胶液', () => {
+  const plan = batchPlan(
+    [{ pigment: { id: 'a', name: 'A', binder: 0 }, pct: 100 }],
+    10,
+    [{ name: '蜂蜜', ratio: 10 }],
+    [{ pigment: { id: 'e', name: 'E', binder: 1.5 }, pct: 8 }],
+  );
+  assert.ok(Math.abs(plan.effects[0].grams - 0.8) < 1e-9);
+  assert.ok(Math.abs(plan.effects[0].binderGrams - 1.2) < 1e-9);
+  assert.ok(Math.abs(plan.binderTotal - 1.2) < 1e-9);
+  assert.ok(Math.abs(plan.extras[0].grams - 1) < 1e-9);
+});
+
+test('migratePigments 补齐新增默认项并保留用户修改，旧数据归入通用分组', () => {
+  const old = [
+    { id: 'pw6', name: '我的白', hex: '#FFFFFF', strength: 1, opacity: 1, binder: 1, owned: true },
+    { id: 'custom-1', name: '自定义', hex: '#123456', strength: 1, opacity: 0.4, binder: 1, owned: true },
+  ];
+  const merged = migratePigments(old);
+  const pw6 = merged.find((p) => p.id === 'pw6');
+  assert.equal(pw6.name, '我的白');
+  assert.equal(pw6.group, 'generic');
+  assert.equal(pw6.preferred, false);
+  assert.equal(merged.filter((p) => p.id === 'pw6').length, 1);
+  assert.equal(merged.filter((p) => p.group === 'mine').length, 36 + EFFECT_PIGMENTS.length);
+  assert.equal(migratePigments(null).length, DEFAULT_PIGMENTS.length);
+  assert.equal(migratePigments(merged).length, merged.length);
 });

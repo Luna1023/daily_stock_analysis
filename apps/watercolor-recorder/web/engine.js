@@ -244,7 +244,8 @@ function refine(optics, pct, targetLab) {
 
 // 在已有原料中搜索最接近目标色的配方；每种用料数（1..maxPigments）各返回一个最优方案。
 // 返回 [{ items: [{ id, pct }], hex, deltaE, count }]，pct 为整数百分比且和为 100。
-export function solveRecipe(targetHex, pigments, { maxPigments = 3 } = {}) {
+export function solveRecipe(targetHex, allPigments, { maxPigments = 3 } = {}) {
+  const pigments = allPigments.filter((p) => p.kind !== 'effect');
   const targetLab = hexToLab(targetHex);
   const optics = pigments.map(pigmentOptics);
   const results = [];
@@ -306,10 +307,47 @@ export function describeDeltaE(d) {
   return '超出现有原料色域，需要补充其他颜料';
 }
 
+export const ACCEPTABLE_DELTA_E = 6;
+
+// 首选「我的原料」：先只用 preferred 且已有的颜料求解；
+// 若色差仍大于阈值，再用全部颜料（含通用参考颜料）求解，只保留明显更好的方案作为「补充方案」。
+// 返回 { preferred: [...], supplement: [...] }，supplement 里的 items 带 extra 标记（不属于我的原料）。
+export function solveWithPreference(targetHex, pigments, { maxPigments = 3, threshold = ACCEPTABLE_DELTA_E } = {}) {
+  const colors = pigments.filter((p) => p.kind !== 'effect');
+  const mine = colors.filter((p) => p.preferred && p.owned);
+  const preferred = mine.length ? solveRecipe(targetHex, mine, { maxPigments }) : [];
+  const best = preferred.length ? Math.min(...preferred.map((r) => r.deltaE)) : Infinity;
+
+  let supplement = [];
+  if (best > threshold) {
+    const mineIds = new Set(mine.map((p) => p.id));
+    supplement = solveRecipe(targetHex, colors, { maxPigments: Math.min(maxPigments, 3) })
+      .filter((r) => r.deltaE < best - 1.5 && r.items.some((it) => !mineIds.has(it.id)))
+      .map((r) => ({ ...r, items: r.items.map((it) => ({ ...it, extra: !mineIds.has(it.id) })) }));
+  }
+  return { preferred, supplement };
+}
+
+// 为目标色推荐效果粉（珠光 / 变色龙）：按正面色或侧视色与目标色的 ΔE00 排序。
+// 效果粉的实际观感取决于底色与角度，这里只做色相接近度的提示。
+export function recommendEffects(targetHex, pigments, limit = 3) {
+  const targetLab = hexToLab(targetHex);
+  return pigments
+    .filter((p) => p.kind === 'effect' && p.owned && p.preferred !== false)
+    .map((p) => {
+      const candidates = [p.hex, p.hex2].filter(Boolean).map((hex) => ({ hex, d: deltaE2000(hexToLab(hex), targetLab) }));
+      const near = candidates.reduce((a, b) => (b.d < a.d ? b : a));
+      return { pigment: p, deltaE: near.d, nearHex: near.hex };
+    })
+    .sort((a, b) => a.deltaE - b.deltaE)
+    .slice(0, limit);
+}
+
 // ---------- 批量配料 ----------
 
-// items: [{ pigment, pct }]；additives: [{ name, ratio }]（ratio 为相对颜料总质量的百分比）
-export function batchPlan(items, totalGrams, additives = []) {
+// items: [{ pigment, pct }]（基础原料，合计 100%）；effects: [{ pigment, pct }]（pct 为占基础原料质量的百分比）
+// additives: [{ name, ratio }]（ratio 为相对基础原料总质量的百分比）
+export function batchPlan(items, totalGrams, additives = [], effects = []) {
   const pigments = items.map((it) => {
     const grams = (totalGrams * it.pct) / 100;
     return {
@@ -320,9 +358,19 @@ export function batchPlan(items, totalGrams, additives = []) {
       binderGrams: grams * (Number(it.pigment.binder) || 0),
     };
   });
-  const binderTotal = pigments.reduce((s, p) => s + p.binderGrams, 0);
+  const effectLines = effects.map((it) => {
+    const grams = (totalGrams * (Number(it.pct) || 0)) / 100;
+    return {
+      id: it.pigment.id,
+      name: it.pigment.name,
+      pct: Number(it.pct) || 0,
+      grams,
+      binderGrams: grams * (Number(it.pigment.binder) || 0),
+    };
+  });
+  const binderTotal = [...pigments, ...effectLines].reduce((s, p) => s + p.binderGrams, 0);
   const extras = additives.map((a) => ({ name: a.name, grams: (totalGrams * Number(a.ratio || 0)) / 100 }));
-  return { pigments, binderTotal, extras };
+  return { pigments, effects: effectLines, binderTotal, extras };
 }
 
 // 把任意正数权重归一化为和为 100 的整数百分比（最大余数法）。
